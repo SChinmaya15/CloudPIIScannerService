@@ -1,11 +1,14 @@
-﻿namespace CloudPiiScannerService.Models.enums
+﻿using System.Text.Json.Serialization;
+
+namespace CloudPiiScannerService.Models.Enums
 {
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum StorageSource
     {
         LOCAL,
-        GOOGLE_DRIVE,
+        AWS_S3,
         DROPBOX,
         ONEDRIVE,
-        AWS_S3
+        GOOGLE_DRIVE
     }
 }

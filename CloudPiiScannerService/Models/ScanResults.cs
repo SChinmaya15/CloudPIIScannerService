@@ -1,4 +1,4 @@
-using CloudPiiScannerService.Models.enums;
+using CloudPiiScannerService.Models.Enums;
 
 namespace CloudPiiScannerService.Models
 {

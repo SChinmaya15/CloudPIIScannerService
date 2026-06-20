@@ -1,4 +1,4 @@
-﻿using CloudPiiScannerService.Models.enums;
+﻿using CloudPiiScannerService.Models.Enums;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace CloudPiiScannerService.Models

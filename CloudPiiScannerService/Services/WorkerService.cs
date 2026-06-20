@@ -1,5 +1,5 @@
 using CloudPiiScannerService.Models;
-using CloudPiiScannerService.Models.enums;
+using CloudPiiScannerService.Models.Enums;
 using DnsClient.Protocol;
 using MongoDB.Bson;
 using MongoDB.Driver;

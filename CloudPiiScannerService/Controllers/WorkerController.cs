@@ -38,7 +38,7 @@ namespace CloudPiiScannerService.Controllers
 
             var id = await _workerService.RegisterAgentAsync(request, HttpContext.RequestAborted);
 
-            return Ok(new { AgentId = id });
+            return Ok(new { Status = "Success", AgentId = id });
         }
 
         [HttpPost("heartbeat")]

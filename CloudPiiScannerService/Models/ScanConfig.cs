@@ -22,7 +22,7 @@ namespace CloudPiiScannerService.Models
 
     public class ScanSource
     {
-        public StorageSource Location { get; set; }//
+        public int Location { get; set; }//
         public string Path { get; set; }
         public string ScanMode { get; set; }
         public Credentials? Credentials { get; set; }

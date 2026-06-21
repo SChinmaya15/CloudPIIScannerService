@@ -5,10 +5,10 @@ namespace CloudPiiScannerService.Models.Enums
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum StorageSource
     {
-        LOCAL,
-        AWS_S3,
-        DROPBOX,
-        ONEDRIVE,
-        GOOGLE_DRIVE
+        LOCAL=0,
+        AWS_S3=1,
+        DROPBOX=2,
+        ONEDRIVE=3,
+        GOOGLE_DRIVE=4
     }
 }

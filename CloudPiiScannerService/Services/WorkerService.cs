@@ -3,6 +3,7 @@ using CloudPiiScannerService.Models.Enums;
 using DnsClient.Protocol;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using System;
 
 namespace CloudPiiScannerService.Services;
 
@@ -91,10 +92,13 @@ public class WorkerService : IWorkerService
     {
         // Define filter to identify unique scan result: MachineName + Source + FilePath + Entity
         if (records is null) throw new ArgumentNullException(nameof(records));
-
+        string scanId = string.Empty;
+        string machineName = string.Empty;
         var list = new List<ScanResultsDocument>();
         foreach (var r in records)
         {
+            if (String.IsNullOrEmpty(scanId)) { scanId = r.ScanId; }
+            if (String.IsNullOrEmpty(machineName)) { machineName = r.MachineName; }
             if (r is null) continue;
             list.Add(new ScanResultsDocument
             {
@@ -113,72 +117,115 @@ public class WorkerService : IWorkerService
 
         // insert results
         await _scanResults.InsertManyAsync(list, cancellationToken: ct);
-
-        // --- NEW: update scan status and per-agent status using ScanId from payload ---
-        // Build mapping: machineName -> agentId (if agent exists)
-        var machineNames = list.Select(x => x.MachineName).Distinct(StringComparer.OrdinalIgnoreCase);
         var machineToAgentId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mn in machineNames)
+        var agent = await _agents.Find(a => a.MachineName == machineName).FirstOrDefaultAsync(ct);
+        //if (agent != null)
+        //{
+        //    machineToAgentId[machineName] = agent.Id;
+        //}
+        await UpdateAgentStatusAsync(scanId, agent.Id, "Completed");
+        //// --- NEW: update scan status and per-agent status using ScanId from payload ---
+        //// Build mapping: machineName -> agentId (if agent exists)
+        //var machineNames = list.Select(x => x.MachineName).Distinct(StringComparer.OrdinalIgnoreCase);
+        //var machineToAgentId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        //foreach (var mn in machineNames)
+        //{
+        //    var agent = await _agents.Find(a => a.MachineName == mn).FirstOrDefaultAsync(ct);
+        //    if (agent != null)
+        //    {
+        //        machineToAgentId[mn] = agent.Id;
+        //    }
+        //}
+
+        //// Group incoming ScanResults (original payload) by ScanId (if provided) and update the ScanConfig record(s)
+        //// Note: ScanResults model includes ScanId; if missing, skip scan status update.
+        //var incomingByScanId = records
+        //    .Where(r => r != null && !string.IsNullOrWhiteSpace(r.ScanId))
+        //    .GroupBy(r => r.ScanId, StringComparer.OrdinalIgnoreCase);
+
+        //foreach (var group in incomingByScanId)
+        //{
+        //    var scanId = group.Key;
+        //    if (string.IsNullOrWhiteSpace(scanId)) continue;
+
+        //    // Determine agent ids involved in this scan payload
+        //    var affectedAgentIds = group
+        //        .Select(r => r.MachineName)
+        //        .Where(mn => !string.IsNullOrWhiteSpace(mn) && machineToAgentId.ContainsKey(mn))
+        //        .Select(mn => machineToAgentId[mn])
+        //        .Distinct()
+        //        .ToList();
+
+        //    if (affectedAgentIds.Count == 0)
+        //    {
+        //        // nothing to update for this scan
+        //        continue;
+        //    }
+
+        //    var filter = Builders<ScanConfig>.Filter.Eq(s => s.Id, scanId);
+
+        //    // Set overall scan status to Completed and update LastRun
+        //    var baseUpdate = Builders<ScanConfig>.Update
+        //        .Set(s => s.Status, "Completed")
+        //        .Set(s => s.LastRun, DateTime.UtcNow);
+
+        //    // Update scan status (once)
+        //    await _scanConfigs.UpdateOneAsync(filter, baseUpdate, cancellationToken: ct);
+
+        //    // For each agentId set the agent status inside the ScanConfig.AgentIds array to "Complete"
+        //    foreach (var agentId in affectedAgentIds)
+        //    {
+        //        var arrayFilter = new BsonDocumentArrayFilterDefinition<BsonDocument>(
+        //            new BsonDocument("elem.agentId", agentId)
+        //        );
+
+        //        var updateAgentStatus = Builders<ScanConfig>.Update.Set("agentIds.$[elem].status", "Complete");
+
+        //        var options = new UpdateOptions
+        //        {
+        //            ArrayFilters = new List<ArrayFilterDefinition> { arrayFilter }
+        //        };
+
+        //        await _scanConfigs.UpdateOneAsync(filter, updateAgentStatus, options, ct);
+        //    }
+        //}
+    }
+
+    public async Task UpdateAgentStatusAsync(
+    string scanId,
+    string agentId,
+    string agentStatus)
+    {
+        var filter = Builders<ScanConfig>.Filter.Eq(x => x.Id, scanId);
+
+        var scan = await _scanConfigs
+            .Find(filter)
+            .FirstOrDefaultAsync();
+
+        if (scan == null)
+            throw new Exception($"Scan {scanId} not found");
+
+        var agent = scan.AgentIds
+            .FirstOrDefault(x => x.AgentId == agentId);
+
+        if (agent == null)
+            throw new Exception($"Agent {agentId} not found");
+
+        agent.Status = agentStatus;
+
+        bool allCompleted = scan.AgentIds
+            .All(x => x.Status.Equals(
+                "Completed",
+                StringComparison.OrdinalIgnoreCase));
+
+        if (allCompleted)
         {
-            var agent = await _agents.Find(a => a.MachineName == mn).FirstOrDefaultAsync(ct);
-            if (agent != null)
-            {
-                machineToAgentId[mn] = agent.Id;
-            }
+            scan.Status = "Completed";
         }
 
-        // Group incoming ScanResults (original payload) by ScanId (if provided) and update the ScanConfig record(s)
-        // Note: ScanResults model includes ScanId; if missing, skip scan status update.
-        var incomingByScanId = records
-            .Where(r => r != null && !string.IsNullOrWhiteSpace(r.ScanId))
-            .GroupBy(r => r.ScanId, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var group in incomingByScanId)
-        {
-            var scanId = group.Key;
-            if (string.IsNullOrWhiteSpace(scanId)) continue;
-
-            // Determine agent ids involved in this scan payload
-            var affectedAgentIds = group
-                .Select(r => r.MachineName)
-                .Where(mn => !string.IsNullOrWhiteSpace(mn) && machineToAgentId.ContainsKey(mn))
-                .Select(mn => machineToAgentId[mn])
-                .Distinct()
-                .ToList();
-
-            if (affectedAgentIds.Count == 0)
-            {
-                // nothing to update for this scan
-                continue;
-            }
-
-            var filter = Builders<ScanConfig>.Filter.Eq(s => s.Id, scanId);
-
-            // Set overall scan status to Completed and update LastRun
-            var baseUpdate = Builders<ScanConfig>.Update
-                .Set(s => s.Status, "Completed")
-                .Set(s => s.LastRun, DateTime.UtcNow);
-
-            // Update scan status (once)
-            await _scanConfigs.UpdateOneAsync(filter, baseUpdate, cancellationToken: ct);
-
-            // For each agentId set the agent status inside the ScanConfig.AgentIds array to "Complete"
-            foreach (var agentId in affectedAgentIds)
-            {
-                var arrayFilter = new BsonDocumentArrayFilterDefinition<BsonDocument>(
-                    new BsonDocument("elem.agentId", agentId)
-                );
-
-                var updateAgentStatus = Builders<ScanConfig>.Update.Set("agentIds.$[elem].status", "Complete");
-
-                var options = new UpdateOptions
-                {
-                    ArrayFilters = new List<ArrayFilterDefinition> { arrayFilter }
-                };
-
-                await _scanConfigs.UpdateOneAsync(filter, updateAgentStatus, options, ct);
-            }
-        }
+        await _scanConfigs.ReplaceOneAsync(
+            filter,
+            scan);
     }
 }
 
